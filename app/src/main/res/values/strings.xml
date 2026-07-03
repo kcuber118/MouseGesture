@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Mouse Gesture</string>
+    <string name="accessibility_service_label">Mouse Gesture</string>
+    <string name="accessibility_service_description">Overlay a touchpad on screen to control a cursor and inject gestures. Helps users with dead zones on their screen or one-handed use.</string>
+    <string name="open_accessibility_settings">Open Accessibility Settings</string>
+    <string name="service_enabled">Mouse Gesture service is running</string>
+    <string name="service_disabled">Mouse Gesture service is not running</string>
+</resources>
