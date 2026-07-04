@@ -1,8 +1,8 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's GitHub issue tracker.
 
-Because this repo uses local-markdown issues (no GitHub/GitLab labels), the "label" is the string written on the `Status:` line near the top of each issue file.
+Because this repo uses **GitHub Issues**, a role's "label" is a real GitHub label applied via `gh issue edit <number> --add-label "<label>"` (and removed with `--remove-label`).
 
 | Label in mattpocock/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |
@@ -12,6 +12,18 @@ Because this repo uses local-markdown issues (no GitHub/GitLab labels), the "lab
 | `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
 | `wontfix`                  | `wontfix`            | Will not be actioned                     |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding string from the right-hand column — either as a `Status:` value in a local issue file.
+When a skill mentions a role (e.g. "apply the AFK-ready triage label"), apply the corresponding label from the right-hand column with `gh issue edit`.
 
-Edit the right-hand column to match whatever vocabulary you actually use.
+## Ensure the labels exist
+
+These five labels must exist on the GitHub repo before `/triage` runs. If any is missing, create it (color is your choice — the values below are suggestions):
+
+```sh
+gh label create needs-triage    --color BFD4F2 || true
+gh label create needs-info      --color FBCA04 || true
+gh label create ready-for-agent --color 0E8A16 || true
+gh label create ready-for-human --color 1D76DB || true
+gh label create wontfix         --color FFFFFF || true
+```
+
+Edit the right-hand column above to match whatever vocabulary you actually use — and update the `gh label create` names to match.
