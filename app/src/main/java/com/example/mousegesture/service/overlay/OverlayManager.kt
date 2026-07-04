@@ -9,15 +9,25 @@ import android.os.Build
 import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.WindowManager
+import com.example.mousegesture.data.DataStorePreferencesRepository
+import com.example.mousegesture.domain.cursor.AccelerationCurve
 import com.example.mousegesture.domain.cursor.CursorController
 import com.example.mousegesture.domain.gesture.GestureFactory
+import com.example.mousegesture.domain.model.Point
 import com.example.mousegesture.domain.model.ScreenBounds
+import com.example.mousegesture.domain.preferences.PreferencesRepository
 import com.example.mousegesture.domain.touchpad.TouchpadMode
 import com.example.mousegesture.domain.touchpad.TouchpadState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 /**
  * Manages the overlay lifecycle: adds/removes views via WindowManager,
- * wires touchpad callbacks to cursor movement and gesture injection.
+ * wires touchpad callbacks to cursor movement and gesture injection,
+ * persists/restores user preferences via [PreferencesRepository].
  */
 class OverlayManager(
     private val service: AccessibilityService,
@@ -29,8 +39,12 @@ class OverlayManager(
     private var touchpadState: TouchpadState? = null
     private val gestureFactory = GestureFactory()
 
+    private val prefsRepo: PreferencesRepository = DataStorePreferencesRepository(service)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
     /**
      * Set up the overlay: create views, add to WindowManager, wire callbacks.
+     * Restores saved preferences (touchpad rect, cursor position, sensitivity).
      */
     fun setup() {
         val wm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -94,12 +108,27 @@ class OverlayManager(
             gravity = Gravity.TOP
         }
         wm.addView(root, params)
+
+        // Restore saved preferences
+        restorePreferences()
+
+        // Observe sensitivity changes live
+        scope.launch {
+            prefsRepo.preferencesFlow().collectLatest { prefs ->
+                val curve = cursorController?.let { ctrl ->
+                    val currentCurve = AccelerationCurve(sensitivity = prefs.sensitivity)
+                    ctrl.updateCurve(currentCurve)
+                    currentCurve
+                }
+            }
+        }
     }
 
     /**
-     * Remove overlay from WindowManager.
+     * Remove overlay from WindowManager and save current state.
      */
     fun teardown() {
+        savePreferences()
         val wm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         overlayView?.let { wm.removeView(it) }
         overlayView = null
@@ -158,5 +187,68 @@ class OverlayManager(
         }
         val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
         return GestureDescription.Builder().addStroke(stroke).build()
+    }
+
+    /**
+     * Restore saved preferences: touchpad rect, cursor position, sensitivity.
+     */
+    private fun restorePreferences() {
+        scope.launch {
+            val prefs = prefsRepo.getPreferences()
+
+            // Restore touchpad rect if saved
+            prefs.touchpadRect?.let { rect ->
+                touchpadState?.let { state ->
+                    // Must be in Edit mode to move, then switch back
+                    if (state.mode != TouchpadMode.EDIT) state.toggleMode()
+                    state.moveBy(rect.left - state.rect.left, rect.top - state.rect.top)
+                    state.moveBy(0f, 0f) // force layout recalc
+                    if (state.mode != TouchpadMode.ACTIVE) state.toggleMode()
+                    overlayView?.let { root ->
+                        root.layoutTouchpad()
+                        root.invalidate()
+                    }
+                }
+            }
+
+            // Restore cursor position if saved
+            prefs.cursorPosition?.let { pos ->
+                cursorController?.let { ctrl ->
+                    // Move cursor to saved position (set via a helper or direct delta)
+                    val dx = pos.x - ctrl.position.x
+                    val dy = pos.y - ctrl.position.y
+                    if (dx != 0f || dy != 0f) {
+                        ctrl.moveBy(dx, dy, speed = 0f)
+                        overlayView?.invalidate()
+                    }
+                }
+            }
+
+            // Restore sensitivity
+            val curve = AccelerationCurve(sensitivity = prefs.sensitivity)
+            cursorController?.updateCurve(curve)
+        }
+    }
+
+    /**
+     * Save current state: touchpad rect, cursor position, sensitivity.
+     */
+    private fun savePreferences() {
+        scope.launch {
+            val rect = touchpadState?.rect
+            val pos = cursorController?.position
+            val sensitivity = cursorController?.let {
+                // Get current sensitivity from the curve — we need to expose it
+                // For now, we'll capture it from the flow's last emission
+                prefsRepo.getPreferences().sensitivity
+            } ?: AccelerationCurve.DEFAULT_SENSITIVITY
+
+            val prefs = com.example.mousegesture.domain.preferences.UserPreferences(
+                sensitivity = sensitivity,
+                touchpadRect = rect,
+                cursorPosition = pos,
+            )
+            prefsRepo.savePreferences(prefs)
+        }
     }
 }

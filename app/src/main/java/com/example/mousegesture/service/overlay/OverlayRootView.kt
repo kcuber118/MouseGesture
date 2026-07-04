@@ -98,7 +98,7 @@ class OverlayRootView(
     /**
      * Position the touchpad view according to [touchpadState.rect].
      */
-    private fun layoutTouchpad() {
+    fun layoutTouchpad() {
         val rect = touchpadState.rect
         touchpadView.layout(
             rect.left.toInt(),

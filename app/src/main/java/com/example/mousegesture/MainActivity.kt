@@ -11,27 +11,36 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.example.mousegesture.data.DataStorePreferencesRepository
+import com.example.mousegesture.domain.preferences.PreferencesRepository
 import com.example.mousegesture.service.MouseGestureAccessibilityService
 import com.example.mousegesture.ui.theme.MouseGestureTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -39,8 +48,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MouseGestureTheme {
+                val appContext = (this as ComponentActivity).applicationContext
+                val prefsRepo = remember {
+                    DataStorePreferencesRepository(appContext)
+                }
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    OnboardingScreen(modifier = Modifier.padding(innerPadding))
+                    OnboardingScreen(
+                        modifier = Modifier.padding(innerPadding),
+                        prefsRepo = prefsRepo,
+                    )
                 }
             }
         }
@@ -48,9 +64,13 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun OnboardingScreen(modifier: Modifier = Modifier) {
+fun OnboardingScreen(
+    modifier: Modifier = Modifier,
+    prefsRepo: PreferencesRepository,
+) {
     val context = LocalContext.current
     var isServiceEnabled by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     // Check service state on launch
     LaunchedEffect(Unit) {
@@ -59,6 +79,11 @@ fun OnboardingScreen(modifier: Modifier = Modifier) {
             MouseGestureAccessibilityService::class.java,
         )
     }
+
+    // Observe preferences for sensitivity slider
+    val prefs by prefsRepo.preferencesFlow().collectAsState(
+        initial = com.example.mousegesture.domain.preferences.UserPreferences(),
+    )
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -96,6 +121,37 @@ fun OnboardingScreen(modifier: Modifier = Modifier) {
                 Text(text = stringResource(R.string.open_accessibility_settings))
             }
         }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Sensitivity slider
+        Text(
+            text = "Độ nhạy (Sensitivity)",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "0.5", style = MaterialTheme.typography.bodySmall)
+            Slider(
+                value = prefs.sensitivity,
+                onValueChange = { newSensitivity ->
+                    scope.launch {
+                        prefsRepo.savePreferences(prefs.withSensitivity(newSensitivity))
+                    }
+                },
+                valueRange = 0.5f..3.0f,
+                modifier = Modifier.weight(1f),
+            )
+            Text(text = "3.0", style = MaterialTheme.typography.bodySmall)
+        }
+        Text(
+            text = "Hiện tại: ${"%.1f".format(prefs.sensitivity)}",
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
