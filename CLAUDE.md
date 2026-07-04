@@ -50,18 +50,18 @@ When adding the gesture feature, the natural place is new composables/screens un
 
 ## Notes
 
-- This directory is **not a git repository** (no `.git`). Version control is not initialized here.
+- This is a git repository (GitHub remote: `kcuber118/MouseGesture`, default branch `main`). Earlier drafts of this note said it was not a git repo — that is no longer true.
 - `local.properties` and `.idea/` workspace files are machine-specific and gitignored — don't rely on or commit them.
 
 ## Agent skills
 
 ### Issue tracker
 
-Issues live as markdown files under `.scratch/<feature-slug>/` (local-markdown tracker — no GitHub/GitLab, no remote). No PRs as a request surface. See `docs/agents/issue-tracker.md`.
+Issues live in **GitHub Issues** for this repo (`kcuber118/MouseGesture`) via the `gh` CLI. PRs are not a request surface. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Five canonical roles use their default names: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` (written on the `Status:` line of a local issue file). See `docs/agents/triage-labels.md`.
+Five canonical roles use their default names — `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` — applied as GitHub labels. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
