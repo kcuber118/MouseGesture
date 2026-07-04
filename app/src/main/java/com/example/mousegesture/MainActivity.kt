@@ -103,6 +103,35 @@ fun OnboardingScreen(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Overlay visibility state. Per ADR-0002.
+            val overlayVisible = MouseGestureAccessibilityService.isOverlayVisible
+            when (overlayVisible) {
+                true -> Text(
+                    text = "Overlay đang bật",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                false -> {
+                    Text(
+                        text = "Overlay đang tắt",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(onClick = {
+                        MouseGestureAccessibilityService.showOverlay()
+                    }) {
+                        Text(text = "Bật overlay")
+                    }
+                }
+                null -> Text(
+                    text = "Đang khởi động…",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         } else {
             Text(
                 text = stringResource(R.string.service_disabled),

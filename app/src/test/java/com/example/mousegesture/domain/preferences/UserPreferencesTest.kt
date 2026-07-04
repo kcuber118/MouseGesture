@@ -65,4 +65,33 @@ class UserPreferencesTest {
         assertEquals(rect, prefs.touchpadRect)
         assertEquals(pos, prefs.cursorPosition)
     }
+
+    // --- overlayVisible field (ADR-0002) ---
+
+    @Test
+    fun defaultOverlayVisible_isTrue() {
+        val prefs = UserPreferences()
+        assertEquals(true, prefs.overlayVisible)
+    }
+
+    @Test
+    fun withOverlayVisible_createsNewInstanceWithUpdatedValue() {
+        val prefs = UserPreferences(overlayVisible = true)
+        val updated = prefs.withOverlayVisible(false)
+
+        assertEquals(true, prefs.overlayVisible) // original unchanged
+        assertEquals(false, updated.overlayVisible)
+    }
+
+    @Test
+    fun fullRoundTrip_includesOverlayVisible() {
+        val prefs = UserPreferences(
+            sensitivity = 1.5f,
+            overlayVisible = false,
+            touchpadRect = TouchpadRect(100f, 200f, 300f, 400f),
+            cursorPosition = Point(540f, 1200f),
+        )
+        assertEquals(false, prefs.overlayVisible)
+        assertEquals(1.5f, prefs.sensitivity, 0.001f)
+    }
 }

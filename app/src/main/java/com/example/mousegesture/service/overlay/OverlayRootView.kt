@@ -4,10 +4,13 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.os.Handler
+import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import com.example.mousegesture.domain.cursor.CursorController
+import com.example.mousegesture.domain.gesture.TouchGestureClassifier
 import com.example.mousegesture.domain.touchpad.TouchpadMode
 import com.example.mousegesture.domain.touchpad.TouchpadRect
 import com.example.mousegesture.domain.touchpad.TouchpadState
@@ -33,6 +36,8 @@ class OverlayRootView(
         const val GRIP_SIZE_PX = 36f
         /** Resize handle radius in pixels. */
         const val RESIZE_HANDLE_RADIUS_PX = 10f
+        /** Duration threshold (ms) for Grip long-press to hide overlay. Per ADR-0002. */
+        const val GRIP_LONG_PRESS_THRESHOLD_MS = 500L
     }
 
     private val cursorPaint = Paint().apply {
@@ -73,6 +78,31 @@ class OverlayRootView(
     private var isDraggingGrip = false
     private var lastGripX = 0f
     private var lastGripY = 0f
+    private var gripDownX = 0f
+    private var gripDownY = 0f
+    private var gripDownTime = 0L
+
+    /** Classifier for Grip gestures: TAP (toggle mode), LONG_PRESS (hide overlay), MOVE (drag). */
+    private val gripClassifier = TouchGestureClassifier()
+
+    /** Handler for scheduling Grip long-press detection. */
+    private val gripHandler = Handler(Looper.getMainLooper())
+
+    /** Runnable that fires when Grip has been held beyond the long-press threshold. */
+    private val gripLongPressRunnable = Runnable {
+        if (isDraggingGrip) {
+            val gesture = gripClassifier.onElapsedTime(GRIP_LONG_PRESS_THRESHOLD_MS)
+            if (gesture == com.example.mousegesture.domain.gesture.GestureType.LONG_PRESS) {
+                onHideOverlayCallback?.invoke()
+            }
+        }
+    }
+
+    /**
+     * Callback invoked when user long-presses the Grip to hide the overlay.
+     * Per ADR-0002: this hides the overlay but keeps the AccessibilityService running.
+     */
+    var onHideOverlayCallback: (() -> Unit)? = null
 
     // Drag state for resize handles
     private var isDraggingResize = false
@@ -133,10 +163,16 @@ class OverlayRootView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (isOnGrip(x, y)) {
-                    // Grip tap/drag
+                    // Grip interaction: start tracking
                     isDraggingGrip = true
                     lastGripX = x
                     lastGripY = y
+                    gripDownX = x
+                    gripDownY = y
+                    gripDownTime = System.currentTimeMillis()
+                    gripClassifier.onDown()
+                    // Schedule long-press detection
+                    gripHandler.postDelayed(gripLongPressRunnable, GRIP_LONG_PRESS_THRESHOLD_MS)
                     return true
                 }
 
@@ -171,14 +207,21 @@ class OverlayRootView(
                 return false
             }
             MotionEvent.ACTION_MOVE -> {
-                if (isDraggingGrip && touchpadState.mode == TouchpadMode.EDIT) {
+                if (isDraggingGrip) {
                     val dx = x - lastGripX
                     val dy = y - lastGripY
-                    touchpadState.moveBy(dx, dy)
+                    // Feed movement to classifier
+                    val gesture = gripClassifier.onMove(dx, dy)
+                    if (gesture == com.example.mousegesture.domain.gesture.GestureType.MOVE) {
+                        gripHandler.removeCallbacks(gripLongPressRunnable)
+                        if (touchpadState.mode == TouchpadMode.EDIT) {
+                            touchpadState.moveBy(dx, dy)
+                            layoutTouchpad()
+                            invalidate()
+                        }
+                    }
                     lastGripX = x
                     lastGripY = y
-                    layoutTouchpad()
-                    invalidate()
                     return true
                 }
                 if (isDraggingResize && touchpadState.mode == TouchpadMode.EDIT) {
@@ -213,13 +256,21 @@ class OverlayRootView(
             }
             MotionEvent.ACTION_UP -> {
                 if (isDraggingGrip) {
-                    if (!hasMovedSignificantly()) {
-                        // Tap on Grip = toggle mode
-                        touchpadState.toggleMode()
-                        // Enable/disable touchpad input based on mode
-                        touchpadView.isEnabled = touchpadState.mode == TouchpadMode.ACTIVE
-                        layoutTouchpad()
-                        invalidate()
+                    gripHandler.removeCallbacks(gripLongPressRunnable)
+                    val elapsed = System.currentTimeMillis() - gripDownTime
+                    val gesture = gripClassifier.onUp(elapsed)
+
+                    when (gesture) {
+                        com.example.mousegesture.domain.gesture.GestureType.TAP -> {
+                            // Tap on Grip = toggle mode
+                            touchpadState.toggleMode()
+                            touchpadView.isEnabled = touchpadState.mode == TouchpadMode.ACTIVE
+                            layoutTouchpad()
+                            invalidate()
+                        }
+                        // LONG_PRESS already handled by gripLongPressRunnable
+                        // MOVE already handled in ACTION_MOVE
+                        else -> { /* already handled */ }
                     }
                     isDraggingGrip = false
                     return true
@@ -324,13 +375,6 @@ class OverlayRootView(
 
     private fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float {
         return kotlin.math.hypot((x2 - x1).toDouble(), (y2 - y1).toDouble()).toFloat()
-    }
-
-    private fun hasMovedSignificantly(): Boolean {
-        // If drag distance is small, it was a tap
-        val dx = lastGripX - (if (isDraggingGrip) lastGripX else lastGripX)
-        return false // Simplified: for now, any DOWN+UP on Grip is a tap
-        // TODO: Track initial down position for better tap vs drag detection
     }
 
     private fun handleResize(dx: Float, dy: Float) {

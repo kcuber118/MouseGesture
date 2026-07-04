@@ -15,7 +15,9 @@ import com.example.mousegesture.domain.cursor.CursorController
 import com.example.mousegesture.domain.gesture.GestureFactory
 import com.example.mousegesture.domain.model.Point
 import com.example.mousegesture.domain.model.ScreenBounds
+import com.example.mousegesture.domain.overlay.OverlayState
 import com.example.mousegesture.domain.preferences.PreferencesRepository
+import com.example.mousegesture.domain.preferences.UserPreferences
 import com.example.mousegesture.domain.touchpad.TouchpadMode
 import com.example.mousegesture.domain.touchpad.TouchpadState
 import kotlinx.coroutines.CoroutineScope
@@ -39,12 +41,22 @@ class OverlayManager(
     private var touchpadState: TouchpadState? = null
     private val gestureFactory = GestureFactory()
 
+    /** Tracks overlay visibility state. Per ADR-0002. */
+    val overlayState = OverlayState()
+
+    /** Whether the overlay is currently visible. */
+    val isOverlayVisible: Boolean get() = overlayState.isVisible
+
+    /** Whether the overlay view is currently attached to WindowManager. */
+    private var isViewAttached = false
+
     private val prefsRepo: PreferencesRepository = DataStorePreferencesRepository(service)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     /**
      * Set up the overlay: create views, add to WindowManager, wire callbacks.
      * Restores saved preferences (touchpad rect, cursor position, sensitivity).
+     * Per ADR-0002: respects saved overlay visibility — if hidden, does not add view.
      */
     fun setup() {
         val wm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -78,6 +90,11 @@ class OverlayManager(
         val root = OverlayRootView(service, cursorController!!, touchpad, touchpadState!!)
         overlayView = root
 
+        // Wire Grip long-press callback → hide overlay. Per ADR-0002.
+        root.onHideOverlayCallback = {
+            hideOverlay()
+        }
+
         // Wire touchpad callbacks — only active in ACTIVE mode
         touchpad.onDragCallback = { dx, dy, speed ->
             if (touchpadState?.mode == TouchpadMode.ACTIVE) {
@@ -96,21 +113,30 @@ class OverlayManager(
             }
         }
 
-        // Add overlay to WindowManager
-        val params = WindowManager.LayoutParams().apply {
-            type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
-            format = PixelFormat.TRANSLUCENT
-            flags = flags or
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-            width = WindowManager.LayoutParams.MATCH_PARENT
-            height = WindowManager.LayoutParams.MATCH_PARENT
-            gravity = Gravity.TOP
-        }
-        wm.addView(root, params)
+        // Add overlay to WindowManager (unless saved preference says hidden)
+        // Per ADR-0002: if user hid overlay, don't show it on service restart
+        scope.launch {
+            val prefs = prefsRepo.getPreferences()
+            if (prefs.overlayVisible) {
+                val params = WindowManager.LayoutParams().apply {
+                    type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+                    format = PixelFormat.TRANSLUCENT
+                    flags = flags or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    width = WindowManager.LayoutParams.MATCH_PARENT
+                    height = WindowManager.LayoutParams.MATCH_PARENT
+                    gravity = Gravity.TOP
+                }
+                wm.addView(root, params)
+                isViewAttached = true
+            } else {
+                overlayState.hide()
+            }
 
-        // Restore saved preferences
-        restorePreferences()
+            // Restore other saved preferences
+            restorePreferences(prefs)
+        }
 
         // Observe sensitivity changes live
         scope.launch {
@@ -135,6 +161,51 @@ class OverlayManager(
         touchpadView = null
         cursorController = null
         touchpadState = null
+        isViewAttached = false
+    }
+
+    /**
+     * Hide the overlay by removing it from WindowManager.
+     * Per ADR-0002: the AccessibilityService keeps running; overlay can be shown again.
+     * Idempotent — no-op if already hidden or not set up.
+     */
+    fun hideOverlay() {
+        if (!overlayState.isVisible) return
+        if (isViewAttached) {
+            val wm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            overlayView?.let { wm.removeView(it) }
+            isViewAttached = false
+        }
+        overlayState.hide()
+        savePreferences()
+    }
+
+    /**
+     * Show the overlay by adding it back to WindowManager.
+     * Per ADR-0002: triggered by opening the app and tapping "Bật overlay".
+     * Idempotent — no-op if already visible.
+     * Requires setup() to have been called first (views must exist).
+     */
+    fun showOverlay() {
+        if (overlayState.isVisible) return
+        val root = overlayView ?: return
+        val wm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val params = WindowManager.LayoutParams().apply {
+            type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            format = PixelFormat.TRANSLUCENT
+            flags = flags or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+            width = WindowManager.LayoutParams.MATCH_PARENT
+            height = WindowManager.LayoutParams.MATCH_PARENT
+            gravity = Gravity.TOP
+        }
+        if (!isViewAttached) {
+            wm.addView(root, params)
+            isViewAttached = true
+        }
+        overlayState.show()
+        savePreferences()
     }
 
     /**
@@ -192,42 +263,38 @@ class OverlayManager(
     /**
      * Restore saved preferences: touchpad rect, cursor position, sensitivity.
      */
-    private fun restorePreferences() {
-        scope.launch {
-            val prefs = prefsRepo.getPreferences()
-
-            // Restore touchpad rect if saved
-            prefs.touchpadRect?.let { rect ->
-                touchpadState?.let { state ->
-                    // Must be in Edit mode to move, then switch back
-                    if (state.mode != TouchpadMode.EDIT) state.toggleMode()
-                    state.moveBy(rect.left - state.rect.left, rect.top - state.rect.top)
-                    state.moveBy(0f, 0f) // force layout recalc
-                    if (state.mode != TouchpadMode.ACTIVE) state.toggleMode()
-                    overlayView?.let { root ->
-                        root.layoutTouchpad()
-                        root.invalidate()
-                    }
+    private fun restorePreferences(prefs: UserPreferences) {
+        // Restore touchpad rect if saved
+        prefs.touchpadRect?.let { rect ->
+            touchpadState?.let { state ->
+                // Must be in Edit mode to move, then switch back
+                if (state.mode != TouchpadMode.EDIT) state.toggleMode()
+                state.moveBy(rect.left - state.rect.left, rect.top - state.rect.top)
+                state.moveBy(0f, 0f) // force layout recalc
+                if (state.mode != TouchpadMode.ACTIVE) state.toggleMode()
+                overlayView?.let { root ->
+                    root.layoutTouchpad()
+                    root.invalidate()
                 }
             }
-
-            // Restore cursor position if saved
-            prefs.cursorPosition?.let { pos ->
-                cursorController?.let { ctrl ->
-                    // Move cursor to saved position (set via a helper or direct delta)
-                    val dx = pos.x - ctrl.position.x
-                    val dy = pos.y - ctrl.position.y
-                    if (dx != 0f || dy != 0f) {
-                        ctrl.moveBy(dx, dy, speed = 0f)
-                        overlayView?.invalidate()
-                    }
-                }
-            }
-
-            // Restore sensitivity
-            val curve = AccelerationCurve(sensitivity = prefs.sensitivity)
-            cursorController?.updateCurve(curve)
         }
+
+        // Restore cursor position if saved
+        prefs.cursorPosition?.let { pos ->
+            cursorController?.let { ctrl ->
+                // Move cursor to saved position (set via a helper or direct delta)
+                val dx = pos.x - ctrl.position.x
+                val dy = pos.y - ctrl.position.y
+                if (dx != 0f || dy != 0f) {
+                    ctrl.moveBy(dx, dy, speed = 0f)
+                    overlayView?.invalidate()
+                }
+            }
+        }
+
+        // Restore sensitivity
+        val curve = AccelerationCurve(sensitivity = prefs.sensitivity)
+        cursorController?.updateCurve(curve)
     }
 
     /**
@@ -243,8 +310,9 @@ class OverlayManager(
                 prefsRepo.getPreferences().sensitivity
             } ?: AccelerationCurve.DEFAULT_SENSITIVITY
 
-            val prefs = com.example.mousegesture.domain.preferences.UserPreferences(
+            val prefs = UserPreferences(
                 sensitivity = sensitivity,
+                overlayVisible = overlayState.isVisible,
                 touchpadRect = rect,
                 cursorPosition = pos,
             )

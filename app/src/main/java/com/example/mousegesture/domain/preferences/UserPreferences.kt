@@ -13,6 +13,8 @@ import com.example.mousegesture.domain.touchpad.TouchpadRect
 data class UserPreferences(
     /** Sensitivity multiplier for the acceleration curve. Default 1.0. */
     val sensitivity: Float = AccelerationCurve.DEFAULT_SENSITIVITY,
+    /** Whether the overlay should be visible on service start. Default true. Per ADR-0002. */
+    val overlayVisible: Boolean = true,
     /** Last known touchpad rect, null if never saved. */
     val touchpadRect: TouchpadRect? = null,
     /** Last known cursor position, null if never saved. */
@@ -20,6 +22,9 @@ data class UserPreferences(
 ) {
     fun withSensitivity(newSensitivity: Float): UserPreferences =
         copy(sensitivity = newSensitivity)
+
+    fun withOverlayVisible(visible: Boolean): UserPreferences =
+        copy(overlayVisible = visible)
 
     fun withTouchpadRect(rect: TouchpadRect): UserPreferences =
         copy(touchpadRect = rect)

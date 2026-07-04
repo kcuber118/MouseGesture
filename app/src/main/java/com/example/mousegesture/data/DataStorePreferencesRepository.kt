@@ -3,6 +3,7 @@ package com.example.mousegesture.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -28,6 +29,7 @@ class DataStorePreferencesRepository(
 
     companion object {
         private val KEY_SENSITIVITY = floatPreferencesKey("sensitivity")
+        private val KEY_OVERLAY_VISIBLE = booleanPreferencesKey("overlay_visible")
         private val KEY_TOUCHPAD_LEFT = floatPreferencesKey("touchpad_left")
         private val KEY_TOUCHPAD_TOP = floatPreferencesKey("touchpad_top")
         private val KEY_TOUCHPAD_RIGHT = floatPreferencesKey("touchpad_right")
@@ -44,6 +46,7 @@ class DataStorePreferencesRepository(
     override suspend fun savePreferences(prefs: UserPreferences) {
         context.dataStore.edit { stored ->
             stored[KEY_SENSITIVITY] = prefs.sensitivity
+            stored[KEY_OVERLAY_VISIBLE] = prefs.overlayVisible
             prefs.touchpadRect?.let { rect ->
                 stored[KEY_TOUCHPAD_LEFT] = rect.left
                 stored[KEY_TOUCHPAD_TOP] = rect.top
@@ -65,6 +68,7 @@ class DataStorePreferencesRepository(
 
     private fun mapToUserPreferences(stored: Preferences): UserPreferences {
         val sensitivity = stored[KEY_SENSITIVITY] ?: AccelerationCurve.DEFAULT_SENSITIVITY
+        val overlayVisible = stored[KEY_OVERLAY_VISIBLE] ?: true
 
         val touchpadRect = if (
             stored[KEY_TOUCHPAD_LEFT] != null &&
@@ -89,6 +93,7 @@ class DataStorePreferencesRepository(
 
         return UserPreferences(
             sensitivity = sensitivity,
+            overlayVisible = overlayVisible,
             touchpadRect = touchpadRect,
             cursorPosition = cursorPosition,
         )

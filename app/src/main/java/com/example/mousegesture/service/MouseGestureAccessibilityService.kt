@@ -21,6 +21,37 @@ class MouseGestureAccessibilityService : AccessibilityService() {
          */
         var isRunning: Boolean = false
             private set
+
+        /**
+         * Current overlay visibility. Per ADR-0002:
+         * - null: service not connected (no overlay to show/hide)
+         * - true: overlay is visible
+         * - false: overlay is hidden (service still running)
+         */
+        @Volatile
+        var isOverlayVisible: Boolean? = null
+            private set
+
+        /**
+         * Show the overlay from outside the service (e.g. MainActivity "Bật overlay" button).
+         * No-op if the service isn't connected.
+         * Updates [isOverlayVisible] after the call.
+         */
+        fun showOverlay() {
+            instance?.overlayManager?.showOverlay()
+            isOverlayVisible = instance?.overlayManager?.isOverlayVisible
+        }
+
+        /**
+         * Hide the overlay from outside the service.
+         * Updates [isOverlayVisible] after the call.
+         */
+        fun hideOverlay() {
+            instance?.overlayManager?.hideOverlay()
+            isOverlayVisible = instance?.overlayManager?.isOverlayVisible
+        }
+
+        private var instance: MouseGestureAccessibilityService? = null
     }
 
     private var overlayManager: OverlayManager? = null
@@ -36,16 +67,21 @@ class MouseGestureAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         isRunning = true
+        instance = this
 
         val gestureDispatcher = AccessibilityGestureDispatcher(this)
-        overlayManager = OverlayManager(this, gestureDispatcher)
-        overlayManager?.setup()
+        overlayManager = OverlayManager(this, gestureDispatcher).also { manager ->
+            manager.setup()
+        }
+        isOverlayVisible = overlayManager?.isOverlayVisible
     }
 
     override fun onDestroy() {
         overlayManager?.teardown()
         overlayManager = null
         isRunning = false
+        isOverlayVisible = null
+        instance = null
         super.onDestroy()
     }
 }
