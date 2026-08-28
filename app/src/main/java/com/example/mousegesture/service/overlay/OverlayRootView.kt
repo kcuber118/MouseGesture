@@ -115,9 +115,19 @@ class OverlayRootView(
         isClickable = false
         isFocusable = false
 
-        // Touchpad is initially positioned by layout logic in onLayout
-        val touchpadParams = LayoutParams(0, 0)
+        // Touchpad is initially positioned by layout logic in onLayout.
+        // Use the touchpad rect dimensions so FrameLayout lays out the child correctly.
+        // LayoutParams(0,0) would cause FrameLayout to give the child zero size,
+        // breaking hit testing and touch forwarding.
+        val initialRect = touchpadState.rect
+        val touchpadParams = LayoutParams(
+            initialRect.width.toInt(),
+            initialRect.height.toInt(),
+        )
         addView(touchpadView, touchpadParams)
+
+        // Ensure touchpad is enabled in Active mode
+        touchpadView.isEnabled = touchpadState.mode == TouchpadMode.ACTIVE
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
@@ -126,10 +136,20 @@ class OverlayRootView(
     }
 
     /**
-     * Position the touchpad view according to [touchpadState.rect].
+     * Position and size the touchpad view according to [touchpadState.rect].
+     * Updates LayoutParams so FrameLayout knows the correct dimensions for hit testing.
+     * Also calls [View.layout] for immediate positioning without waiting for a layout pass.
      */
     fun layoutTouchpad() {
         val rect = touchpadState.rect
+        // Update LayoutParams so FrameLayout measures/lays out the child correctly
+        val lp = touchpadView.layoutParams
+        if (lp != null) {
+            lp.width = rect.width.toInt()
+            lp.height = rect.height.toInt()
+            touchpadView.layoutParams = lp
+        }
+        // Also set the absolute position directly for immediate effect
         touchpadView.layout(
             rect.left.toInt(),
             rect.top.toInt(),
